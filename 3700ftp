@@ -1,0 +1,189 @@
+import sys
+import socket
+from urllib.parse import urlparse
+
+# Variables
+parsed_url = ""
+username = "anonymous"
+password = ""
+host = ""
+port = 21
+code = ""
+arg2 = ""
+localToRemote = False
+ftp_path = ""
+local_file = ""
+
+# parsing the command line for operations with 1 argument
+def settingOneArg():
+    global parsed_url, ftp_path
+    if len(sys.argv) > 3 : print("Invalid arguments for operation") 
+    else : 
+        parsed_url = urlparse(sys.argv[2])
+        ftp_path = parsed_url.path
+
+# parsing the command line for operations with 2 argument
+def settingTwoArgs():
+    global parsed_url, ftp_path, local_file, localToRemote
+    if len(sys.argv) > 4 : print("Invalid arguments for operation") 
+    else : 
+        if sys.argv[2][:6] == "ftp://":
+            parsed_url = urlparse(sys.argv[2])
+            ftp_path = parsed_url.path
+            local_file = sys.argv[3]
+        else:
+            local_file = sys.argv[2]
+            parsed_url = urlparse(sys.argv[3])
+            ftp_path = parsed_url.path
+            localToRemote = True
+
+# Checks the command line arguments
+def arguments():
+    global username, password, host, port, path, code
+    urlparse("ftp://username:password@hostname:port/path")
+    match (sys.argv[1]):
+        case 'ls': 
+            code = "LIST"
+            settingOneArg()
+        case 'mkdir': 
+            code = "MKD"
+            settingOneArg()
+            if parsed_url.path == '/': 
+                print("Invalid path")
+                return False
+        case 'rm': 
+            code = "DELE"
+            settingOneArg()
+        case 'rmdir': 
+            code = "RMD"
+            settingOneArg()
+            if parsed_url.path == '/': 
+                print("Invalid path")
+                return False
+        case 'cp': 
+            settingTwoArgs()
+            code = "STOR" if localToRemote else "RETR"
+            print("CODE", code)
+        case 'mv': 
+            code = "MOVE"
+            settingTwoArgs()
+        case other:
+            print("Invalid operation")
+    
+    # setting the parsed url parts to the corresponding variables or default values if missing
+    username = parsed_url.username if isinstance(parsed_url.username, str) else "anonymous"
+    port = parsed_url.port if isinstance(parsed_url.port, int) else 21
+    password, host = parsed_url.password, parsed_url.hostname
+
+    # making sure host is given
+    if isinstance(host, str):
+        return True
+    else:
+        return False
+
+# Gets data channel's ip address and port to connect to tcp socket
+def getSocketDetails(pasv_message):
+    ip_start = pasv_message.find('(') + 1
+    ip_end = -1
+    
+    for i in range(0, 4):
+        ip_end = pasv_message.find(',', ip_end + 1)
+    
+    ip = pasv_message[ip_start:ip_end].replace(',', '.')
+    
+    port = pasv_message[ip_end + 1: -2]
+    port_sep = port.find(',')
+    port = (int(port[:port_sep]) << 8) + int(port[port_sep + 1:])
+    
+    return {"ip": ip, "port": port}
+
+def main():
+    if arguments():
+        # create control channel
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            ip = socket.gethostbyname(host)
+            s.connect((ip, port))
+
+            response = s.recv(1024).decode('UTF-8')[:-2]
+            print(response)
+
+            message = "USER " + username + "\r\n"
+            s.send(message.encode())
+            response = s.recv(1024).decode('UTF-8')[:-2]
+            # print(response)
+
+            if isinstance(password, str):
+                message = "PASS " + password + "\r\n"
+                s.send(message.encode())
+                response = s.recv(1024).decode('UTF-8')[:-2]
+            print(response)
+
+            message = "TYPE I\r\n"
+            s.send(message.encode())
+            response = s.recv(1024).decode('UTF-8')[:-2]
+            # print(response)
+
+            message = "MODE S\r\n"
+            s.send(message.encode())
+            response = s.recv(1024).decode('UTF-8')[:-2]
+            # print(response)
+
+            message = "STRU F\r\n"
+            s.send(message.encode())
+            response = s.recv(1024).decode('UTF-8')[:-2]
+            # print(response)
+
+            if (code == "MKD" or code == "RMD" or code == "DELE"):
+                message = code + " " + ftp_path + "\r\n"
+                s.send(message.encode())
+                response = s.recv(1024).decode('UTF-8')[:-2]
+                print(response)
+            else:
+                message = "PASV\r\n"
+                s.send(message.encode())
+                response = s.recv(1024).decode('UTF-8')[:-2]
+                print(response)
+                
+                # Creating Data Channel
+                sock_details = getSocketDetails(response)
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s2:
+                    s2.connect((sock_details["ip"], sock_details["port"]))
+                
+                    # ls
+                    # message = code + " " + ftp_path + "\r\n"
+                    # s.send(message.encode())
+                    # response = s2.recv(1024).decode('UTF-8')[:-2]
+                    # print(response)
+
+                    # ls % cp
+                    message = code + " " + ftp_path + "\r\n"
+                    print(message)
+                    s.send(message.encode())
+                    response = s.recv(1024).decode('UTF-8')[:-2] if localToRemote else s2.recv(1024).decode('UTF-8')[:-2]
+                    print(response)
+
+                    if not localToRemote and code == "RETR":
+                        f = open(local_file, "w")
+                        f.write(response)
+                        f.close()
+                    
+                    # mv
+
+                    s2.close()
+
+                # clear responses
+                response = s.recv(1024).decode('UTF-8')[:-2]
+                print(response)
+            message = "QUIT\r\n"
+            s.send(message.encode())
+            response = s.recv(1024).decode('UTF-8')[:-2]
+            print(response)
+
+
+
+main()
+
+# connect to ftp: https://stackoverflow.com/questions/26715101/python-sockets-connect-to-ftp-dont-receive-what-i-expect
+# socket send: https://pythontic.com/modules/socket/send 
+# help withhttps://www.geeksforgeeks.org/python-ways-to-find-nth-occurrence-of-substring-in-a-string/
+# python write to file: https://www.w3schools.com/python/python_file_write.asp 
