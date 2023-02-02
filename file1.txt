@@ -1,1 +1,0 @@
-file to send or delete to ftp servers
