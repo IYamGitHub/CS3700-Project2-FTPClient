@@ -94,12 +94,14 @@ def getSocketDetails(pasv_message):
     
     return {"ip": ip, "port": port}
 
+# sending a message to given socket
 def serverInteract(s, message):
-    s.send(message.encode())
+    if message: 
+        s.send(message.encode())
     response = ""
     while response[-2:] != '\r\n':
         print(response)
-        response += s.recv(1024).decode('UTF-8')
+        response += s.recv(4096).decode('UTF-8')
     print(response[:-2])
     return(response)
 
@@ -111,8 +113,7 @@ def main():
             s.connect((ip, port))
 
             # Reading the Welcome message
-            response = s.recv(1024).decode('UTF-8')
-            print(response)
+            serverInteract(s, "")
 
             # Setting up FTP connection
             message = "USER " + username + "\r\n"
@@ -149,8 +150,17 @@ def main():
                     # Handling ls, cp, mv1
                     message = code + " " + ftp_path + "\r\n"
                     s.send(message.encode())
-                    response = s.recv(1024) if localToRemote else s2.recv(1024)
-                    print(response[:-2])
+
+                    if localToRemote:
+                        serverInteract(s, "")
+                    else: 
+                        response = b''
+                        while(True):
+                            resp = s2.recv(4096)
+                            if(not resp):
+                                break
+                            response += resp
+                    print(1, response)
 
                     # Send data to data channel
                     if localToRemote:
@@ -167,8 +177,7 @@ def main():
                         f.write(response)
                         f.close()
                         # clear responses
-                        response = s.recv(1024).decode('UTF-8')[:-2]
-                        print(response)
+                        serverInteract(s, "")
 
                     s2.close() # close the data channel if not closed already
                 # Deleting the original file for mv operation
@@ -181,8 +190,7 @@ def main():
                         os.remove(local_file)
 
                 # clear responses
-                response = s.recv(1024).decode('UTF-8')[:-2]
-                print(response)
+                serverInteract(s, "")
             # Telling FTP server to close the connection
             message = "QUIT\r\n"
             serverInteract(s, message)
